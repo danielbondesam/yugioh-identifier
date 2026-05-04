@@ -11,71 +11,102 @@ This is a **two-stage system design**:
 
 The architecture is intentionally designed to facilitate easy migration from web to mobile.
 
-## 🏗️ Stage 1: Web MVP Architecture
+## 🏗️ Stage 1: Web MVP Architecture (Enhanced v2)
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Browser (React)                     │
-│                                                      │
-│  ┌──────────────────┐          ┌────────────────┐  │
-│  │   CameraCapture  │   ROI    │ ResultDisplay  │  │
-│  │   Component      ├─overlay─→│   Component    │  │
-│  │                  │          │                │  │
-│  │  - getUserMedia  │          │  - Card info   │  │
-│  │  - Canvas draw   │          │  - Stats       │  │
-│  │  - Blob encode   │          │  - Confidence  │  │
-│  └────────┬─────────┘          └────────────────┘  │
-│           │                                         │
-│           │ FormData (blob)                         │
-│           ▼                                         │
-│       HTTP POST                                     │
-└──────────┼──────────────────────────────────────────┘
-           │
-           │ :3000 <-> :8000
-           │
-┌──────────▼──────────────────────────────────────────┐
-│            FastAPI Backend (Python)                 │
-│                                                     │
-│  ┌────────────────────────────────────────────┐   │
-│  │  POST /identify_card                        │   │
-│  │                                             │   │
-│  │  1. Image Preprocessing (ImageProcessor)   │   │
-│  │     - Crop fixed ROI (400x600)             │   │
-│  │     - Extract name region (top 80px)       │   │
-│  │     - Grayscale, threshold, sharpen        │   │
-│  │     - 2x upscale                           │   │
-│  │                                             │   │
-│  │  2. OCR Extraction (OCREngine)             │   │
-│  │     - Tesseract text extraction            │   │
-│  │     - Confidence scoring                   │   │
-│  │                                             │   │
-│  │  3. Card Matching (CardMatcher)            │   │
-│  │     - Fuzzy string matching (FuzzyWuzzy)   │   │
-│  │     - Token sort ratio comparison          │   │
-│  │     - Top-N candidate fallback             │   │
-│  │                                             │   │
-│  │  4. Confidence Scoring                     │   │
-│  │     - combined = 0.4*ocr + 0.6*fuzzy      │   │
-│  │     - threshold filtering (MIN_CONFIDENCE) │   │
-│  │                                             │   │
-│  └────────────────────────────────────────────┘   │
-│                                                     │
-│  ┌────────────────────────────────────────────┐   │
-│  │  External Dependencies                      │   │
-│  │                                             │   │
-│  │  ├─ CardCache (app/card_cache.py)         │   │
-│  │  │  └─ YGOPRODeck API (HTTP)              │   │
-│  │  │  └─ Local JSON cache (24h expiry)      │   │
-│  │  │                                         │   │
-│  │  └─ Tesseract OCR (System binary)         │   │
-│  │     └─ via pytesseract wrapper            │   │
-│  │                                             │   │
-│  └────────────────────────────────────────────┘   │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  Browser (React)                          │
+│  ┌──────────────────────┐     ┌─────────────────────┐   │
+│  │  CameraCapture       │     │ ResultDisplay       │   │
+│  │  Component           │────→│ Component           │   │
+│  │                      │     │                     │   │
+│  │ - getUserMedia       │     │ - Card info         │   │
+│  │ - Canvas capture     │     │ - Metrics display   │   │
+│  │ - Blob encode        │     │ - Quality feedback  │   │
+│  └──────────┬───────────┘     │ - Suggestions       │   │
+│             │                  └─────────────────────┘   │
+│      FormData (blob)                                      │
+└─────────────┼──────────────────────────────────────────────┘
+              │ HTTP POST
+              ▼
+┌──────────────────────────────────────────────────────────┐
+│         FastAPI Backend (Python) - Enhanced Pipeline    │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │  POST /identify_card (7-Step Pipeline)             │ │
+│  │                                                    │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 1. IMAGE RECEPTION & ROI CROP (400x600) │    │ │
+│  │  │    └─ ImageProcessor.crop_fixed_roi()   │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 2. QUALITY ASSESSMENT                    │    │ │
+│  │  │    └─ ImageQualityAnalyzer.assess()     │    │ │
+│  │  │       • Brightness, contrast, sharpness │    │ │
+│  │  │       • Motion blur, noise detection    │    │ │
+│  │  │       • Composite score (0-1)           │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 3. NAME EXTRACTION (Top 80px)            │    │ │
+│  │  │    ├─ Extract region                     │    │ │
+│  │  │    ├─ Preprocess (threshold, sharpen)    │    │ │
+│  │  │    └─ OCREngine.extract_card_name()      │    │ │
+│  │  │       → (name_text, ocr_confidence)      │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 4. CODE EXTRACTION (Bottom ~60px)        │    │ │
+│  │  │    ├─ Extract region (ROI_TOP=500)       │    │ │
+│  │  │    ├─ Aggressive preprocessing (3x zoom) │    │ │
+│  │  │    ├─ CardCodeExtractor.extract_and_...  │    │ │
+│  │  │    └─ Regex validation vs patterns       │    │ │
+│  │  │       → (code, is_valid, confidence)    │    │ │
+│  │  │       • Passcode: \d{8}-\d+             │    │ │
+│  │  │       • Release: [A-Z]{2,4}-\d{3,4}    │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 5. FUZZY MATCHING                        │    │ │
+│  │  │    └─ CardMatcher.find_best_match()      │    │ │
+│  │  │       • Token sort ratio matching        │    │ │
+│  │  │       • 11,000+ cards database           │    │ │
+│  │  │       → (card_dict, confidence)          │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 6. CONFIDENCE AGGREGATION                │    │ │
+│  │  │    combined_score =                      │    │ │
+│  │  │      0.30 × name_ocr_conf +             │    │ │
+│  │  │      0.40 × fuzzy_match_conf +          │    │ │
+│  │  │      0.15 × code_ocr_conf +             │    │ │
+│  │  │      0.15 × image_quality_score         │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                    ▼                              │ │
+│  │  ┌──────────────────────────────────────────┐    │ │
+│  │  │ 7. RESULT GENERATION & FEEDBACK          │    │ │
+│  │  │    ├─ needs_review flag (< 0.80 or QA) │    │ │
+│  │  │    ├─ Actionable suggestions             │    │ │
+│  │  │    ├─ Full metrics breakdown             │    │ │
+│  │  │    └─ source: "combined_pipeline"        │    │ │
+│  │  └──────────────────────────────────────────┘    │ │
+│  │                                                    │ │
+│  └────────────────────────────────────────────────────┘ │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │  External Dependencies                             │ │
+│  │  • CardCache → YGOPRODeck API (cached 24h)        │ │
+│  │  • Tesseract OCR (system binary)                  │ │
+│  │  • FuzzyWuzzy (token sort matching)               │ │
+│  │  • OpenCV (image processing)                      │ │
+│  │  • NumPy (numerical operations)                   │ │
+│  └────────────────────────────────────────────────────┘ │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
 ```
 
-## 🔄 Data Pipeline (Detailed)
+## 🔄 Data Pipeline (Detailed - Enhanced v2)
 
 ### Phase 1: Image Acquisition
 - **Component**: `CameraCapture.js` (React)
@@ -87,67 +118,161 @@ The architecture is intentionally designed to facilitate easy migration from web
   - Captures single frame on user action
   - No image preprocessing on frontend
 
-### Phase 2: Image Reception & Preprocessing
+### Phase 2: Fixed ROI Extraction
 - **Component**: `ImageProcessor.crop_fixed_roi()`
 - **Input**: Raw JPEG blob
 - **Process**:
   1. Decode JPEG to numpy array (OpenCV)
   2. Center-crop to fixed dimensions (400x600px)
-  3. Extract top region for name (80px height)
-- **Output**: Cropped grayscale image
-- **Rationale**: 
+- **Output**: Cropped RGB image
+- **Rationale**:
   - Fixed camera = predictable card position
-  - No need for YOLO/object detection
-  - Center crop is O(1) operation
+  - No YOLO/object detection needed
+  - O(1) operation with deterministic positioning
 
-### Phase 3: OCR Preprocessing
-- **Component**: `ImageProcessor.preprocess_for_ocr()`
-- **Input**: Cropped color image
+### Phase 3: Image Quality Assessment
+- **Component**: `ImageQualityAnalyzer.assess_quality()`
+- **Input**: Cropped card image (400x600)
 - **Process**:
-  1. Convert to grayscale (if needed)
-  2. **Adaptive threshold** (11x11 kernel) - handles variable lighting
-  3. **Morphological close** - fills small gaps in text
-  4. **Median blur** (3x3) - removes noise without blurring edges
-  5. **2x upscaling** - improves text recognition accuracy
-- **Output**: Binary preprocessed image (ready for OCR)
-- **Why Adaptive Threshold?**
-  - Standard threshold fails with uneven lighting
-  - Adaptive compares each pixel to local neighborhood mean
-  - Much more robust for real-world card images
+  1. **Brightness Score**: Normalized to optimal range (128 ± 128)
+  2. **Contrast Score**: Standard deviation / 80 (max useful contrast)
+  3. **Sharpness Score**: Laplacian variance / 500 (higher = sharper)
+  4. **Motion Blur Score**: Edge density analysis (using Sobel)
+  5. **Noise Score**: Median filter difference analysis
+  6. **Composite Score**: Weighted average:
+     - 30% sharpness (most important for OCR)
+     - 25% contrast (text visibility)
+     - 20% motion blur (stability indicator)
+     - 15% brightness (lighting adequacy)
+     - 10% noise (sensor quality)
+- **Output**: Quality metrics dict + `is_acceptable` flag (threshold: 0.60)
+- **Use Case**: Determines reliability of OCR and matching, triggers suggestions
 
-### Phase 4: OCR Execution
-- **Component**: `OCREngine.extract_card_name()`
-- **Input**: Preprocessed image
+### Phase 4: Card Name Extraction
+- **Component**: `ImageProcessor.extract_name_region()` → `preprocess_for_ocr()` → `OCREngine.extract_card_name()`
+- **Input**: Cropped card image
 - **Process**:
-  1. Call Tesseract with `--psm 6` (uniform block of text)
-  2. Extract both text AND per-word confidence scores
-  3. Calculate average confidence across all words
-- **Output**: (extracted_text, confidence_score)
+  1. Extract top 80px (typical card name location)
+  2. **Preprocessing**:
+     - Grayscale conversion
+     - Adaptive threshold (11x11 kernel, Gaussian C=2)
+     - Morphological close (2x2 kernel) to connect broken text
+     - Median blur (3x3) to reduce noise
+     - **2x upscaling** for improved Tesseract accuracy
+  3. Tesseract OCR with `--psm 6` (uniform block)
+  4. Per-word confidence scoring (normalized 0-1)
+- **Output**: (extracted_name, ocr_confidence)
 - **Key Metrics**:
-  - Tesseract confidence: 0-100 scale → normalized to 0-1
-  - Handles ~90% of cases with >0.85 confidence
-  - Low confidence (<0.6) triggers fallback matching
+  - Confidence: Average per-word Tesseract confidence
+  - Typical: >0.85 for well-lit, centered cards
 
-### Phase 5: Card Matching
-- **Component**: `CardMatcher.find_best_match()`
-- **Input**: (ocr_text, ocr_confidence)
+### Phase 5: Card Code Extraction
+- **Component**: `CardCodeExtractor.extract_and_validate()`
+- **Input**: Cropped card image (400x600)
 - **Process**:
-  1. For each card in database:
-     - Calculate token_sort_ratio(ocr_text, card_name)
-     - Token sort handles word reordering
-  2. Find card with best fuzzy match score
-  3. Calculate combined confidence:
+  1. **ROI Extraction**: Bottom region (~60px from y=500)
+     - Card codes typically printed at bottom
+     - Small text requires specific handling
+  2. **Aggressive Preprocessing** (more intensive than name):
+     - **3x upscaling** (vs 2x for name) due to small text
+     - **Larger adaptive threshold** (15x15 kernel vs 11x11)
+     - **Stronger morphological ops** (3x3 kernel vs 2x2)
+     - Targets small text clarity over large text
+  3. **Pattern Validation**: Regex matching against known formats:
+     ```python
+     CARD_CODE_PATTERNS = [
+       r'\b(\d{8}-\d+)\b',           # Passcode: 25345090-1
+       r'\b([A-Z]{2,4}-\d{3,4})\b',  # Release: SDK-001
+       r'\b([A-Z]{3,4})\s*-\s*(\d{3,4})\b',  # With space
+     ]
      ```
-     fuzzy_confidence = fuzzy_score / 100
-     combined = (0.4 * ocr_confidence) + (0.6 * fuzzy_confidence)
-     ```
-  4. Filter by MIN_CONFIDENCE threshold
+  4. **Confidence Scoring**:
+     - OCR confidence × 1.2 if pattern valid (reinforcement)
+     - OCR confidence × 0.6 if pattern invalid (penalty)
+- **Output**: {code, ocr_text, ocr_confidence, is_valid, confidence}
+- **Why Separate OCR?**
+  - Card codes use different font/size than name
+  - Requires different preprocessing for small text
+  - Pattern validation adds signal independent from OCR
+
+### Phase 6: Card Matching
+- **Component**: `CardMatcher.find_best_match()`
+- **Input**: (extracted_name, name_ocr_confidence)
+- **Process**:
+  1. For each card in database (11,000+):
+     - Calculate `token_sort_ratio(extracted_name, card_name)`
+     - Token sort: "DRAGON WHITE EYES BLUE" matches "BLUE-EYES WHITE DRAGON"
+     - Handles word reordering, punctuation, spacing
+  2. Find card with highest fuzzy score
+  3. Calculate fuzzy_confidence = fuzzy_score / 100
 - **Output**: Matched card dict OR None
-- **Fallback**: If no exact match, return top 5 candidates
-- **Why 40/60 weighting?**
-  - OCR is variable, fuzzy matching is more consistent
-  - But OCR directly extracts card name (primary signal)
-  - Fuzzy matching provides robustness against OCR errors
+- **Fallback**: If no match above threshold, return top-5 candidates
+- **Why FuzzyWuzzy?**
+  - Robust to OCR errors (missing/extra chars)
+  - Token sort handles formatting variations
+  - More reliable than exact string matching
+
+### Phase 7: Combined Confidence Scoring
+- **Component**: Main `/identify_card` endpoint logic
+- **Input**: All confidence signals from phases 3-6
+- **Formula**:
+  ```python
+  combined_confidence = (
+    0.30 × name_ocr_confidence +
+    0.40 × fuzzy_match_confidence +
+    0.15 × code_ocr_confidence +
+    0.15 × image_quality_score
+  )
+  ```
+- **Weighting Rationale**:
+  - **40% Fuzzy Matching**: Most reliable signal
+    - Validated against known database
+    - Robust to OCR variations
+  - **30% Name OCR**: Primary signal
+    - Direct extraction from card
+    - Highest signal-to-noise in good conditions
+  - **15% Image Quality**: Reliability indicator
+    - Affects all other signals
+    - Lower quality = lower confidence in all results
+  - **15% Card Code OCR**: Validation signal
+    - Confirms card identity
+    - Less critical than name but valuable for validation
+
+### Phase 8: Result Generation & User Feedback
+- **Component**: Response building logic
+- **Needs Review Flag**: Set if ANY of:
+  - combined_confidence < 0.80
+  - code validation failed (is_valid = false)
+  - image quality unacceptable (is_acceptable = false)
+- **Suggestions Array**: Generated based on failures:
+  - Sharpness < 0.5 → "Image is blurry. Try steady hand."
+  - Brightness < 0.4 → "Image too dark. Increase lighting."
+  - Brightness > 0.9 → "Image too bright. Reduce glare."
+  - Noise < 0.5 → "Too much noise. Clean lens."
+  - Code validation failed → "Card code not visible/readable."
+  - Low confidence → "Try repositioning card."
+- **Response Structure**:
+  ```json
+  {
+    "success": true,
+    "name": "...",
+    "code": "...",
+    "card_id": 12345,
+    "confidence": 0.94,
+    "source": "combined_pipeline",
+    "needs_review": false,
+    "suggestions": [],
+    "metrics": {
+      "name_ocr": 0.92,
+      "code_ocr": 0.88,
+      "fuzzy_match": 0.96,
+      "image_quality": 0.91,
+      "quality_breakdown": {...}
+    },
+    "extracted_text": {"name": "...", "code": "..."},
+    ...card_details
+  }
+  ```
 
 ## 🗄️ Data Models
 
