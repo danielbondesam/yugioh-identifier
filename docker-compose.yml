@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/cache:/app/cache
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TESSERACT_PATH=/usr/bin/tesseract
+      - MIN_CONFIDENCE=0.75
+      - FUZZY_MATCH_THRESHOLD=80
+      - CACHE_EXPIRY_HOURS=24
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_BACKEND_URL=http://backend:8000
+    stdin_open: true
+    tty: true
+
+networks:
+  default:
+    name: yugioh-identifier
