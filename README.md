@@ -5,9 +5,17 @@ A production-ready MVP for identifying Yu-Gi-Oh trading cards using smartphone c
 ## 🎯 Features
 
 - **📷 Real-time Camera Capture** - Browser-based camera access using MediaDevices API
-- **🎴 Card Identification** - Extract card names via Tesseract OCR
+- **🎴 Card Identification** - Extract card names and codes via Tesseract OCR
+- **📊 Dual OCR Pipeline** - Separate extraction for card name (top region) and card code (bottom region)
 - **🔍 Fuzzy Matching** - Intelligent card matching against YGOPRODeck database
-- **📊 Confidence Scoring** - Combined OCR + fuzzy matching confidence metrics
+- **📈 Advanced Confidence Scoring** - Combined score from 4 independent signals:
+  - Name OCR extraction confidence
+  - Card code OCR confidence
+  - Fuzzy matching confidence
+  - Image quality metrics
+- **🎚️ Image Quality Analysis** - Automatic assessment of brightness, contrast, sharpness, motion blur, and noise
+- **💡 Smart Suggestions** - Actionable feedback based on image quality and extraction confidence
+- **🚨 Review Flags** - Identifies low-confidence matches requiring manual review
 - **💾 Local Caching** - Automatic database caching with expiry management
 - **📱 Mobile-First UI** - Tailwind CSS responsive design optimized for smartphone cameras
 - **🎯 Fixed ROI** - Optimized for fixed camera placement (eliminates heavy detection models)
@@ -231,6 +239,8 @@ Force refresh card database from YGOPRODeck API.
 │   │   ├── config.py               # Configuration constants
 │   │   ├── image_processor.py      # Image preprocessing pipeline
 │   │   ├── ocr_engine.py           # Tesseract OCR wrapper
+│   │   ├── card_code_extractor.py  # Card code extraction and validation
+│   │   ├── image_quality.py        # Image quality analysis
 │   │   ├── card_matcher.py         # Fuzzy matching logic
 │   │   ├── card_cache.py           # YGOPRODeck API and caching
 │   │   └── __init__.py
@@ -242,6 +252,152 @@ Force refresh card database from YGOPRODeck API.
 ```
 
 ## 🔄 Data Pipeline
+
+### Enhanced 7-Step OCR Pipeline (v2)
+
+The improved pipeline combines name extraction, card code recognition, image quality analysis, and fuzzy matching for comprehensive card identification:
+
+```
+1. IMAGE CAPTURE → 2. CROP ROI → 3. QUALITY CHECK → 4. NAME EXTRACTION → 
+5. CODE EXTRACTION → 6. FUZZY MATCH → 7. CONFIDENCE SCORING → RESULT
+```
+
+#### Step-by-Step Process
+
+**Step 1: Fixed ROI Extraction (400×600px)**
+- Crops center region of captured image
+- Fixed dimensions work with fixed camera placement
+- O(1) operation with no object detection
+
+**Step 2: Image Quality Assessment**
+- Calculates brightness, contrast, and sharpness metrics
+- Detects motion blur using edge analysis
+- Estimates noise level with median filtering
+- **Composite quality score** from weighted metrics:
+  - 30% sharpness (most important)
+  - 25% contrast
+  - 20% motion blur
+  - 15% brightness
+  - 10% noise
+- Returns `is_acceptable` flag (threshold: 0.60)
+
+**Step 3: Card Name Extraction (top 80px)**
+- Preprocesses region with adaptive threshold
+- Applies morphological operations
+- Upscales 2x for better OCR accuracy
+- Tesseract extracts text with confidence scoring
+- Returns: (name_text, ocr_confidence)
+
+**Step 4: Card Code Extraction (bottom region)**
+- Dedicated ROI for code region (bottom ~60px)
+- **More aggressive preprocessing** for small text:
+  - 3x upscaling (vs 2x for name)
+  - Higher adaptive threshold block size
+  - Morphological close for connected characters
+- Validates against Yu-Gi-Oh code patterns:
+  - Passcode format: `25345090-1` (8 digits-digit)
+  - Release format: `SDK-001` (code-numbers)
+  - Handles whitespace and normalization
+- Returns: (validated_code, ocr_confidence, is_valid)
+
+**Step 5: Fuzzy Matching**
+- Compares extracted name against 11,000+ card database
+- Uses token sort ratio to handle word reordering
+- Returns best match or top-N candidates
+- Provides fuzzy_confidence score
+
+**Step 6: Combined Confidence Scoring**
+- Integrates 4 independent signals:
+  ```
+  combined_confidence = 
+    (30% × name_ocr_confidence) +
+    (40% × fuzzy_match_confidence) +
+    (15% × code_ocr_confidence) +
+    (15% × image_quality_score)
+  ```
+- **Why these weights?**
+  - Fuzzy matching is most reliable (40%)
+  - Name OCR is primary signal (30%)
+  - Image quality indicates reliability (15%)
+  - Card code validates identity (15%)
+
+**Step 7: Quality & Suggestions**
+- Sets `needs_review` flag if:
+  - `combined_confidence < 0.80`, OR
+  - Card code validation failed, OR
+  - Image quality unacceptable
+- Generates actionable suggestions based on failures:
+  - "Image is blurry" (sharpness < 0.5)
+  - "Image too dark/bright" (brightness issues)
+  - "Too much noise" (noise > 0.5)
+  - "Card code not visible"
+  - "Try repositioning"
+
+#### Response Format
+
+```json
+{
+  "success": true,
+  "name": "Blue-Eyes White Dragon",
+  "code": "25345090",
+  "card_id": 25345090,
+  "confidence": 0.94,
+  "source": "combined_pipeline",
+  "needs_review": false,
+  "suggestions": [],
+  "metrics": {
+    "name_ocr": 0.92,
+    "code_ocr": 0.88,
+    "code_valid": true,
+    "fuzzy_match": 0.96,
+    "image_quality": 0.91,
+    "quality_breakdown": {
+      "brightness": 0.85,
+      "contrast": 0.89,
+      "sharpness": 0.95,
+      "motion_blur": 0.92,
+      "noise": 0.80
+    }
+  },
+  "extracted_text": {
+    "name": "BLUE EYES WHITE DRAGON",
+    "code": "25345090"
+  },
+  "type": "Synchro/Effect Monster",
+  "atk": 3000,
+  "def": 2500,
+  "level": 8,
+  "attribute": "LIGHT",
+  "race": "Dragon",
+  "description": "...",
+  "image_url": "..."
+}
+```
+
+### Configuration
+
+Key pipeline parameters in `backend/app/config.py`:
+
+```python
+# ROI Settings
+FIXED_ROI_WIDTH = 400
+FIXED_ROI_HEIGHT = 600
+CARD_NAME_ROI_HEIGHT = 80
+CARD_CODE_ROI_TOP = 500
+CARD_CODE_ROI_HEIGHT = 60
+
+# Thresholds
+IMAGE_QUALITY_THRESHOLD = 0.60
+MIN_CONFIDENCE = 0.75
+
+# Confidence Weighting
+NAME_OCR_WEIGHT = 0.30
+CODE_OCR_WEIGHT = 0.15
+FUZZY_MATCH_WEIGHT = 0.40
+IMAGE_QUALITY_WEIGHT = 0.15
+```
+
+## 🔄 Legacy Data Pipeline (v1)
 
 1. **Image Capture** - User captures image from camera
 2. **ROI Extraction** - Fixed region (400x600px) cropped from center
