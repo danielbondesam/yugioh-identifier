@@ -23,6 +23,7 @@ function App() {
       setBackendHealth(response.ok);
     } catch (err) {
       setBackendHealth(false);
+      console.warn('Backend health check failed:', err.message);
     }
   };
 

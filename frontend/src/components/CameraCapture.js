@@ -21,11 +21,25 @@ function CameraCapture({ onCapture, loading, backendReady }) {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          // Força o vídeo a reproduzir (necessário em mobile)
+          videoRef.current.play().catch(err => {
+            console.warn('Autoplay failed:', err);
+          });
           setCameraError(null);
         }
       } catch (err) {
-        setCameraError('Camera access denied. Please allow camera permissions.');
-        console.error('Camera error:', err);
+        let errorMessage = 'Camera access denied. Please allow camera permissions.';
+        
+        if (err.name === 'NotAllowedError') {
+          errorMessage = 'Camera permission denied. Please grant camera access in settings.';
+        } else if (err.name === 'NotFoundError') {
+          errorMessage = 'No camera device found on this device.';
+        } else if (err.name === 'NotSecureError') {
+          errorMessage = 'HTTPS or localhost is required for camera access.';
+        }
+        
+        setCameraError(errorMessage);
+        console.error('Camera error:', err.name, err.message);
       }
     };
 
@@ -34,6 +48,7 @@ function CameraCapture({ onCapture, loading, backendReady }) {
     return () => {
       if (videoRef.current && videoRef.current.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
       }
     };
   }, [cameraActive]);
