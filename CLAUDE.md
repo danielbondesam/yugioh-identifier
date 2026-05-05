@@ -153,18 +153,19 @@ The architecture is intentionally designed to facilitate easy migration from web
 - **Input**: Cropped card image
 - **Process**:
   1. Extract top 80px (typical card name location)
-  2. **Preprocessing**:
+  2. **Preprocessing** (optimized v2):
      - Grayscale conversion
-     - Adaptive threshold (11x11 kernel, Gaussian C=2)
-     - Morphological close (2x2 kernel) to connect broken text
+     - **Upscale FIRST** (4x for <300px width, 3x for <600px, 2x for >600px)
+     - CLAHE contrast enhancement (`clipLimit=3.0`)
+     - Otsu thresholding (automatic optimal threshold)
      - Median blur (3x3) to reduce noise
-     - **2x upscaling** for improved Tesseract accuracy
   3. Tesseract OCR with `--psm 6` (uniform block)
   4. Per-word confidence scoring (normalized 0-1)
 - **Output**: (extracted_name, ocr_confidence)
 - **Key Metrics**:
   - Confidence: Average per-word Tesseract confidence
-  - Typical: >0.85 for well-lit, centered cards
+  - Typical: >0.85 for well-lit cards; >0.50 acceptable in low-light with optimized preprocessing
+- **Note**: Upscaling BEFORE CLAHE produces superior results for small text compared to traditional pipelines
 
 ### Phase 5: Card Code Extraction
 - **Component**: `CardCodeExtractor.extract_and_validate()`
@@ -173,10 +174,12 @@ The architecture is intentionally designed to facilitate easy migration from web
   1. **ROI Extraction**: Bottom region (~60px from y=500)
      - Card codes typically printed at bottom
      - Small text requires specific handling
-  2. **Aggressive Preprocessing** (more intensive than name):
-     - **3x upscaling** (vs 2x for name) due to small text
-     - **Larger adaptive threshold** (15x15 kernel vs 11x11)
-     - **Stronger morphological ops** (3x3 kernel vs 2x2)
+  2. **Aggressive Preprocessing** (v2 optimized):
+     - CLAHE contrast enhancement (`clipLimit=3.0`)
+     - **Upscale AGGRESSIVELY** (5x for <300px, 4x for <600px, 3x for >600px)
+     - Otsu thresholding (better than adaptive for small text)
+     - Morphological close (3x3 kernel) to connect broken characters
+     - Median blur (3x3) to reduce noise
      - Targets small text clarity over large text
   3. **Pattern Validation**: Regex matching against known formats:
      ```python
@@ -433,7 +436,74 @@ combined_confidence = 0.4 * ocr_conf + 0.6 * fuzzy_conf
 - Card database (loaded): ~15MB
 - **Total**: ~20MB footprint
 
-## 🔐 Error Handling Strategy
+## � Tuning for Lighting Conditions
+
+### Current Settings (v2 - Low-Light Optimized)
+
+The system is now tuned for challenging lighting environments:
+
+**Thresholds (config.py):**
+- `IMAGE_QUALITY_THRESHOLD = 0.50` (was 0.60)
+  - Accepts images with lower quality scores
+  - Brightness acceptable range: 40-225 (wider than before)
+  - Sharpness weighted 35% (up from 30%) as most critical for OCR
+  
+- `FUZZY_MATCH_THRESHOLD = 70` (was 80)
+  - More lenient card matching in poor OCR conditions
+  - Allows partial/corrupted name extraction to still match
+  
+- `MIN_CONFIDENCE = 0.65` (was 0.75)
+  - Accepts lower combined confidence results
+  - Reduces "needs_review" flag triggering
+
+**Image Quality Scoring:**
+- Brightness weight: 0.10 (down from 0.15) - less critical in low-light
+- Sharpness weight: 0.35 (up from 0.30) - most critical for OCR
+- Contrast weight: 0.25 (unchanged)
+- Motion blur weight: 0.20 (unchanged)
+- Noise weight: 0.10 (unchanged)
+
+**Preprocessing (image_processor.py & card_code_extractor.py):**
+- CLAHE `clipLimit=3.0` (was 2.0) - more aggressive contrast enhancement
+- Pipeline order: Upscale → CLAHE → Otsu (optimal for small text)
+- Dynamic upscaling: 4x for <300px, 3x for <600px, 2x for >600px
+
+### Adjustment Guidelines
+
+**If still having issues in your lighting:**
+
+1. **Very poor lighting** (requires additional boost):
+   - Lower `IMAGE_QUALITY_THRESHOLD` to 0.40
+   - Lower `FUZZY_MATCH_THRESHOLD` to 60
+   - Lower `MIN_CONFIDENCE` to 0.55
+   - Increase CLAHE `clipLimit` to 4.0
+
+2. **Variable lighting** (shadows, reflections):
+   - Keep current thresholds
+   - Ensure fixed camera mount prevents motion blur
+   - Add soft diffusion lighting if possible
+
+3. **Good lighting** (restore stricter checks):
+   - Increase `IMAGE_QUALITY_THRESHOLD` to 0.55-0.60
+   - Increase `FUZZY_MATCH_THRESHOLD` back to 75-80
+   - Increase `MIN_CONFIDENCE` to 0.70-0.75
+   - Reduce CLAHE `clipLimit` to 2.0 for cleaner output
+
+### Testing Strategy
+
+**Recommended progression:**
+1. Test with current low-light settings (0.50 quality, 70 fuzzy, 0.65 confidence)
+2. If >80% success rate: deployment ready
+3. If 50-80%: needs better lighting or further threshold reduction
+4. If <50%: image resolution likely insufficient (add better camera)
+
+**Validation:**
+- Use fixed 3D printed mount for 100% consistent framing
+- Test with 5-10 cards per lighting condition
+- Log min/max/avg confidence scores for trending
+- Adjust one threshold at a time for clear impact measurement
+
+## �🔐 Error Handling Strategy
 
 ### Network Errors
 - Backend unreachable → Frontend shows "Backend Offline"

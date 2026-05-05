@@ -482,11 +482,24 @@ http://localhost:8000/docs
 
 Edit [backend/app/config.py](backend/app/config.py):
 
-- `FIXED_ROI_WIDTH` / `FIXED_ROI_HEIGHT` - Card region dimensions
-- `CARD_NAME_ROI_HEIGHT` - Top region height for name extraction
-- `FUZZY_MATCH_THRESHOLD` - Minimum match score (0-100)
-- `MIN_CONFIDENCE` - Minimum combined confidence required
-- `CACHE_EXPIRY_HOURS` - How long to keep cached cards
+**Image Processing:**
+- `FIXED_ROI_WIDTH` / `FIXED_ROI_HEIGHT` - Card region dimensions (400x600)
+- `CARD_NAME_ROI_HEIGHT` - Top region height for name extraction (80px)
+- `CARD_CODE_ROI_TOP` / `CARD_CODE_ROI_HEIGHT` - Card code location (bottom ~60px)
+
+**Quality & Matching Thresholds:**
+- `IMAGE_QUALITY_THRESHOLD` - Minimum acceptable image quality score (default: 0.50)
+  - 0-1 scale; lower values are more lenient with poor lighting
+  - Set to 0.50 for low-light environments
+- `FUZZY_MATCH_THRESHOLD` - Minimum fuzzy matching score (default: 70)
+  - 0-100 scale; lower values accept more loosely matching card names
+  - Reduced to 70 from 80 for improved low-light tolerance
+- `MIN_CONFIDENCE` - Minimum combined confidence to return result (default: 0.65)
+  - 0-1 scale; lower values allow accepting lower-confidence identifications
+  - Reduced to 0.65 from 0.75 for difficult lighting conditions
+
+**Caching:**
+- `CACHE_EXPIRY_HOURS` - How long to keep cached cards (default: 24)
 
 ### Tesseract Path
 
@@ -497,12 +510,33 @@ TESSERACT_PATH = r"C:\path\to\tesseract.exe"  # Windows
 TESSERACT_PATH = "/usr/bin/tesseract"  # Linux
 ```
 
+## 🔧 Tuning for Lighting Conditions
+
+If experiencing low identification rates in your lighting environment:
+
+**Reduce thresholds** in [backend/app/config.py](backend/app/config.py):
+- Lower `IMAGE_QUALITY_THRESHOLD` (e.g., 0.40 for very poor lighting)
+- Lower `FUZZY_MATCH_THRESHOLD` (e.g., 60 for lenient matching)
+- Lower `MIN_CONFIDENCE` (e.g., 0.55 for accepting lower-confidence results)
+
+**Preprocessing improvements** (already applied):
+- CLAHE contrast enhancement set to `clipLimit=3.0` (aggressive)
+- Preprocessing pipeline: upscale BEFORE contrast enhancement
+- Brightness scoring range widened to accommodate low-light
+
+**Recommendations for best results:**
+- Use fixed camera mount for consistent framing
+- Provide direct even lighting on card (avoid shadows)
+- Test with printed 3D camera mount for 100% steady positioning
+- Gradually adjust thresholds if specific lighting is permanent
+
 ## ⚠️ Known Limitations
 
 - Requires fixed camera placement for optimal performance
-- Lighting quality significantly affects OCR accuracy
+- Lighting quality significantly affects OCR accuracy (optimal: 40-225 brightness range)
 - Large file sizes on first API call (downloads full card database)
 - Card image URLs must be accessible (YGOPRODeck external images)
+- Very low resolution images (<250px) may require additional preprocessing tuning
 
 ## 📄 License
 
