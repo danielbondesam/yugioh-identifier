@@ -154,23 +154,28 @@ class ImageQualityAnalyzer:
         noise = cls.detect_noise(image)
 
         # Normalize scores to 0-1
-        brightness_score = max(0, min(1, 1.0 - abs(brightness - 128) / 128))
+        # Brightness: more lenient with low-light (wider acceptable range)
+        # Accept 40-225 range (was 30-225)
+        brightness_score = max(0, min(1, 1.0 - abs(brightness - 128) / 140))
         contrast_score = max(0, min(1, contrast / 80))
         sharpness_score = max(0, min(1, sharpness / 500))
         motion_blur_score = motion_blur  # Already 0-1
         noise_score = max(0, 1.0 - noise)  # Invert: lower noise = higher score
 
         # Composite score with weights
+        # Reduced brightness weight from 0.15 to 0.10 (less critical in low-light)
+        # Increased sharpness weight from 0.30 to 0.35 (more important for OCR)
         overall_quality = (
-            brightness_score * 0.15 +
+            brightness_score * 0.10 +
             contrast_score * 0.25 +
-            sharpness_score * 0.30 +
+            sharpness_score * 0.35 +
             motion_blur_score * 0.20 +
             noise_score * 0.10
         )
 
-        # Image is acceptable if quality is above 0.60
-        is_acceptable = overall_quality >= 0.60
+        # Image is acceptable if quality is above 0.50 (lowered from 0.60)
+        # More lenient threshold to accommodate low-light conditions
+        is_acceptable = overall_quality >= 0.50
 
         return {
             "brightness": round(brightness_score, 3),

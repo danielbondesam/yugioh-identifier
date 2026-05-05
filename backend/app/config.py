@@ -21,7 +21,8 @@ OCR_LANGUAGE = "eng"
 TESSERACT_PATH = os.getenv("TESSERACT_PATH", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 
 # Image Quality configuration
-IMAGE_QUALITY_THRESHOLD = 0.60  # Minimum acceptable image quality (0-1)
+IMAGE_QUALITY_THRESHOLD = 0.50  # Minimum acceptable image quality (0-1)
+# Lowered from 0.60 to improve tolerance for low-light conditions
 
 # API configuration
 YGOPRODECK_API_BASE = "https://db.ygoprodeck.com/api/v7"
@@ -29,8 +30,8 @@ CARD_CACHE_FILE = CACHE_DIR / "cards_cache.json"
 CACHE_EXPIRY_HOURS = 24
 
 # Matching configuration
-FUZZY_MATCH_THRESHOLD = 80
-MIN_CONFIDENCE = 0.75
+FUZZY_MATCH_THRESHOLD = 70  # Lowered from 80 for improved low-light tolerance
+MIN_CONFIDENCE = 0.65  # Lowered from 0.75 to accept cards with lower confidence
 
 # Confidence weighting for combined score
 # name_ocr_weight + code_ocr_weight + fuzzy_weight + quality_weight = 1.0

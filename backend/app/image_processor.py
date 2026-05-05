@@ -103,8 +103,9 @@ class ImageProcessor:
         )
 
         # CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        # Better for card images with varying lighting
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # More aggressive for low-light conditions
+        # Increased clipLimit from 2.0 to 3.0 for better contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(upscaled)
 
         # Otsu thresholding - automatically finds optimal threshold
