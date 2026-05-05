@@ -62,7 +62,7 @@ class CardCodeExtractor:
     @staticmethod
     def preprocess_for_code_ocr(
         image: np.ndarray,
-        upscale_factor: int = 3
+        upscale_factor: int = None
     ) -> np.ndarray:
         """
         Preprocess image specifically for small card code text.
@@ -74,7 +74,7 @@ class CardCodeExtractor:
 
         Args:
             image: Input image region
-            upscale_factor: Upscaling multiplier (3x for small text)
+            upscale_factor: Override upscale factor (None = auto-detect)
 
         Returns:
             Preprocessed image
@@ -85,23 +85,34 @@ class CardCodeExtractor:
         else:
             gray = image
 
-        # Aggressive upscaling first (before processing)
+        # Auto-detect upscale factor based on image size
+        if upscale_factor is None:
+            h, w = gray.shape[:2]
+            # For small images, use even more aggressive upscaling
+            if w < 300:
+                upscale_factor = 5
+            elif w < 600:
+                upscale_factor = 4
+            else:
+                upscale_factor = 3
+
+        # CLAHE for better contrast
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Aggressive upscaling first for small text
         upscaled = cv2.resize(
-            gray,
+            enhanced,
             None,
             fx=upscale_factor,
             fy=upscale_factor,
             interpolation=cv2.INTER_CUBIC
         )
 
-        # Adaptive threshold for better text separation
-        thresh = cv2.adaptiveThreshold(
-            upscaled,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            blockSize=15,  # Larger block for small text
-            C=3  # Stronger correction
+        # Otsu thresholding for small text
+        _, thresh = cv2.threshold(
+            upscaled, 0, 255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
 
         # Morphological close to connect broken characters

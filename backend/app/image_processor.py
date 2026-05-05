@@ -18,13 +18,17 @@ class ImageProcessor:
         
         Args:
             image: Input image array
-            width: ROI width
-            height: ROI height
+            width: ROI width (target)
+            height: ROI height (target)
             
         Returns:
-            Cropped image array
+            Cropped image array (will be smaller if source image is small)
         """
         h, w = image.shape[:2]
+        
+        # If image is too small, use full image
+        if w < width or h < height:
+            return image
         
         # Center crop
         x_start = max(0, (w - width) // 2)
@@ -49,19 +53,23 @@ class ImageProcessor:
         return image[:region_height, :]
 
     @staticmethod
-    def preprocess_for_ocr(image: np.ndarray) -> np.ndarray:
+    def preprocess_for_ocr(image: np.ndarray, upscale_factor: int = None) -> np.ndarray:
         """
         Preprocess image for Tesseract OCR.
         
-        Pipeline:
+        Pipeline (optimized order for small text):
         1. Grayscale
-        2. Adaptive threshold
-        3. Contrast enhancement
-        4. Denoising
-        5. Upscaling
+        2. Upscale first (dynamic based on image size)
+        3. CLAHE contrast enhancement
+        4. Otsu thresholding for better text isolation
+        5. Denoising
+        
+        NOTE: Upscaling BEFORE contrast enhancement produces better results
+        than upscaling after, especially for small text.
         
         Args:
             image: Input image
+            upscale_factor: Override upscale factor (None = auto-detect)
             
         Returns:
             Preprocessed image
@@ -72,32 +80,44 @@ class ImageProcessor:
         else:
             gray = image
 
-        # Adaptive threshold for better text separation
-        thresh = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            blockSize=11,
-            C=2
+        # Auto-detect upscale factor based on image size
+        if upscale_factor is None:
+            h, w = gray.shape[:2]
+            # For small images (< 300px width), use 4x upscaling
+            # For medium (300-600px), use 3x
+            # For large (> 600px), use 2x
+            if w < 300:
+                upscale_factor = 4
+            elif w < 600:
+                upscale_factor = 3
+            else:
+                upscale_factor = 2
+
+        # UPSCALE FIRST - This is critical for small text recognition
+        upscaled = cv2.resize(
+            gray,
+            None,
+            fx=upscale_factor,
+            fy=upscale_factor,
+            interpolation=cv2.INTER_CUBIC
+        )
+
+        # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # Better for card images with varying lighting
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(upscaled)
+
+        # Otsu thresholding - automatically finds optimal threshold
+        # Better than fixed/adaptive threshold for mixed text
+        _, thresh = cv2.threshold(
+            enhanced, 0, 255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
 
         # Denoise
         denoised = cv2.medianBlur(thresh, 3)
 
-        # Morph operations to clean up
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        processed = cv2.morphologyEx(denoised, cv2.MORPH_CLOSE, kernel)
-
-        # Upscale 2x for better OCR accuracy
-        processed = cv2.resize(
-            processed,
-            None,
-            fx=2,
-            fy=2,
-            interpolation=cv2.INTER_CUBIC
-        )
-
-        return processed
+        return denoised
 
     @staticmethod
     def enhance_contrast(image: np.ndarray) -> np.ndarray:
