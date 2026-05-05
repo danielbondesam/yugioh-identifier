@@ -530,6 +530,58 @@ If experiencing low identification rates in your lighting environment:
 - Test with printed 3D camera mount for 100% steady positioning
 - Gradually adjust thresholds if specific lighting is permanent
 
+## 📸 Dataset Capture Tool
+
+If card identification is failing, use the **Card Capture Dataset Tool** to build a local test dataset and debug the recognition pipeline independently.
+
+**This is NOT the main scanner** - it's a lightweight utility for collecting images and testing OCR/preprocessing/matching in isolation.
+
+### Quick Start
+
+```bash
+cd tools/card_capture
+pip install -r requirements.txt
+
+# Capture images with your USB camera
+python capture_cards.py --camera 0 --label my_card_name
+```
+
+### Why Use It?
+
+- **Debug OCR** - Test text extraction on real cards
+- **Verify preprocessing** - Check image quality metrics
+- **Test matching** - Validate fuzzy matching logic
+- **Build regression tests** - Create test dataset for future improvements
+- **Isolate problems** - Identify if issue is in camera, lighting, OCR, or matching
+
+### Output
+
+Captures are saved with metadata:
+```
+data/captured_cards/
+├── raw/                    # Full frame captures
+├── roi/                    # ROI-cropped images (optional)
+└── metadata.csv           # Image metadata and timestamps
+```
+
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| SPACE | Capture image |
+| Q | Quit |
+| R | Reset counter |
+| C | Change camera |
+| H | Show help |
+
+### Full Documentation
+
+See [tools/card_capture/README.md](tools/card_capture/README.md) for:
+- Complete usage examples
+- Troubleshooting camera issues
+- Debugging workflows for each pipeline component
+- Integration with main scanner
+
 ## ⚠️ Known Limitations
 
 - Requires fixed camera placement for optimal performance

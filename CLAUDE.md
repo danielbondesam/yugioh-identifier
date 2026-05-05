@@ -652,7 +652,164 @@ Display Result (200ms total)
 - Memory profiling
 - Cache hit rate monitoring
 
-## 🚀 Deployment
+## � Dataset Capture Tool for Pipeline Debugging
+
+**Location:** `tools/card_capture/`
+
+The Card Capture Dataset Tool is a lightweight utility for collecting real card images and debugging the recognition pipeline **without running the full scanner**.
+
+### Why It Exists
+
+The 7-step OCR pipeline may fail due to issues in:
+1. **Image Quality Assessment** - Metrics not reflecting actual usability
+2. **Preprocessing (Upscaling/CLAHE/Otsu)** - Text may become unreadable
+3. **OCR Extraction** - Tesseract produces garbage output
+4. **Fuzzy Matching** - No candidates found despite correct text
+5. **Confidence Scoring** - Weights not properly calibrated
+
+This tool isolates each component for independent testing.
+
+### Workflow: Using Captured Images to Debug
+
+#### 1. Capture Real Cards
+
+```bash
+cd tools/card_capture
+python capture_cards.py --camera 0 --label test_card
+```
+
+Captures 5-10 images to build a test dataset.
+
+#### 2. Test Image Quality Assessment
+
+```python
+import cv2
+from backend.app.image_quality import ImageQualityAnalyzer
+
+img = cv2.imread('data/captured_cards/raw/20260505_153012_test_card_001.jpg')
+quality = ImageQualityAnalyzer.assess_quality(img)
+print(quality)
+# Returns: brightness, contrast, sharpness, motion_blur, noise, overall_quality, is_acceptable
+```
+
+**Debug questions:**
+- Is `is_acceptable` True when the card is clearly visible?
+- Are brightness/contrast scores reasonable for the lighting?
+- Does sharpness score correlate with visual sharpness?
+
+#### 3. Test Preprocessing Pipeline
+
+```python
+import cv2
+from backend.app.image_processor import ImageProcessor
+
+img = cv2.imread('data/captured_cards/raw/20260505_153012_test_card_001.jpg')
+cropped = img[:80, :]  # Top region (name area)
+preprocessed = ImageProcessor.preprocess_for_ocr(cropped)
+
+cv2.imwrite('debug_preprocessed.jpg', preprocessed)
+```
+
+**Debug questions:**
+- Is text clearly visible and isolated after preprocessing?
+- Are there artifacts or noise?
+- Compare upscale-before-CLAHE vs other orderings in debug images
+
+#### 4. Test OCR Text Extraction
+
+```python
+import cv2
+import pytesseract
+from backend.app.image_processor import ImageProcessor
+
+img = cv2.imread('data/captured_cards/raw/20260505_153012_test_card_001.jpg')
+cropped = img[:80, :]
+preprocessed = ImageProcessor.preprocess_for_ocr(cropped)
+text = pytesseract.image_to_string(preprocessed, config='--psm 6')
+data = pytesseract.image_to_data(preprocessed, output_type=pytesseract.Output.DICT)
+
+print(f"Extracted: {text}")
+print(f"Confidence: {sum(int(c) for c in data['conf'] if int(c) > 0) / len([c for c in data['conf'] if int(c) > 0])}")
+```
+
+**Debug questions:**
+- Is extracted text close to actual card name?
+- Is Tesseract confidence calibrated? (high conf on garbage text?)
+- Try different `--psm` modes (3, 6, 8, 11, 13) for improvement
+
+#### 5. Test Fuzzy Matching
+
+```python
+from backend.app.card_matcher import CardMatcher
+from backend.app.card_cache import CardCache
+
+cards = CardCache.get_cards()
+matcher = CardMatcher(cards)
+
+# Test with extracted text from step 4
+extracted = "Blue Eyes White Dragon"
+result = matcher.find_best_match(extracted, 0.8)
+
+if result:
+    print(f"Found: {result['name']}")
+else:
+    print("No match - try different fuzzy threshold")
+```
+
+**Debug questions:**
+- Does extracted text fuzzy match the correct card?
+- Try lowering `FUZZY_MATCH_THRESHOLD` (70 vs 80 vs 60)
+- Check if token sort ratio is working correctly for your card names
+
+#### 6. Validate Full Pipeline
+
+Once individual components work, test the complete `/identify_card` endpoint:
+
+```python
+import requests
+import cv2
+
+img = cv2.imread('data/captured_cards/raw/20260505_153012_test_card_001.jpg')
+_, buffer = cv2.imencode('.jpg', img)
+
+response = requests.post(
+    'http://localhost:8000/identify_card',
+    files={'image': buffer.tobytes()}
+)
+
+result = response.json()
+print(f"Confidence: {result['confidence']}")
+print(f"Needs review: {result['needs_review']}")
+print(f"Suggestions: {result['suggestions']}")
+```
+
+### Metadata for Analysis
+
+All captured images logged to `data/captured_cards/metadata.csv`:
+
+```csv
+filename,roi_filename,label,camera_index,width,height,captured_at,notes
+20260505_153012_test_card_001.jpg,,test_card,0,1280,720,2026-05-05T15:30:12.123456,
+```
+
+### Building Regression Tests
+
+After debugging, use captured images to build regression tests:
+
+```bash
+# Copy images to test folder
+cp data/captured_cards/raw/* backend/tests/images/
+
+# Create test script that validates:
+# - Image quality scores are reasonable
+# - OCR produces correct text
+# - Fuzzy matching finds correct card
+# - Confidence scores are calibrated
+```
+
+This prevents future changes from breaking working cards.
+
+## �🚀 Deployment
 
 ### Backend Deployment (Production)
 ```bash
